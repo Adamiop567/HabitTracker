@@ -125,6 +125,18 @@ check('neexistující → 404 noUser', r.status === 404 && r.data.error === 'noU
 r = await call('GET', '/api/admin/users/..%2Fsecret/data', { auth: A })
 check('traversal → 400', r.status === 400)
 
+console.log('— admin: změna zobrazovaného jména')
+r = await call('PATCH', '/api/admin/users/jana', { auth: A, body: { displayName: 'Jana Nová' } })
+check('PATCH displayName → 200', r.status === 200 && r.data.displayName === 'Jana Nová')
+r = await call('PATCH', '/api/admin/users/jana', { auth: A, body: { displayName: '' } })
+check('prázdné jméno → 400', r.status === 400)
+r = await call('PATCH', '/api/admin/users/ghost', { auth: A, body: { displayName: 'X' } })
+check('neexistující → 404', r.status === 404)
+r = await call('POST', '/api/login', { body: { username: 'jana', password: 'heslo1' } })
+check('login odráží nové displayName', r.status === 200 && r.data.displayName === 'Jana Nová')
+r = await call('GET', '/api/admin/users', { auth: A })
+check('admin seznam ukazuje nové displayName', r.status === 200 && r.data.data.some((u) => u.username === 'jana' && u.displayName === 'Jana Nová'))
+
 console.log('— admin: mazání')
 r = await call('DELETE', '/api/admin/users/jana', { auth: A })
 check('smazání jana → 200', r.status === 200 && r.data.ok)

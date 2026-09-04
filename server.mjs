@@ -213,6 +213,24 @@ async function handleApi(req, res, url) {
     return json(res, 200, { ok: true, data: users })
   }
 
+  // Admin: změna zobrazovaného jména uživatele
+  if (method === 'PATCH' && path.startsWith('/api/admin/users/')) {
+    const a = parseAuth(req)
+    if (!a || !isAdminCreds(a.user, a.password)) return json(res, 401, { ok: false, error: 'wrongCreds' })
+    const name = normalizeUser(decodeURIComponent(path.slice('/api/admin/users/'.length)))
+    if (!USER_RE.test(name) || name === ADMIN_USER) return json(res, 400, { ok: false, error: 'badName' })
+    let body = {}
+    try { body = JSON.parse((await readBody(req)) || '{}') } catch { body = {} }
+    const displayName = String(body.displayName ?? '').trim().replace(/ +/g, ' ')
+    if (!displayName || displayName.length > 40) return json(res, 400, { ok: false, error: 'badName' })
+    const rec = await loadUser(name)
+    if (!rec) return json(res, 404, { ok: false, error: 'noUser' })
+    rec.displayName = displayName
+    await writeJsonAtomic(userFile(name), rec)
+    console.log(`[auth] admin změnil jméno: ${name} → ${displayName}`)
+    return json(res, 200, { ok: true, displayName })
+  }
+
   // Admin: data konkrétního uživatele (jen ke čtení – „jak si vede“)
   if (method === 'GET' && path.startsWith('/api/admin/users/') && path.endsWith('/data')) {
     const a = parseAuth(req)

@@ -178,6 +178,22 @@ async function handleApi(request, env, url) {
     return json(200, { ok: true, data: users })
   }
 
+  // ---------- admin: změna zobrazovaného jména uživatele ----------
+  if (method === 'PATCH' && path.startsWith('/api/admin/users/')) {
+    const a = parseAuth(request)
+    if (!a || !isAdminCreds(a.user, a.password)) return json(401, { ok: false, error: 'wrongCreds' })
+    const name = normalizeUser(decodeURIComponent(path.slice('/api/admin/users/'.length)))
+    if (!USER_RE.test(name) || name === ADMIN_USER) return json(400, { ok: false, error: 'badName' })
+    const body = (await readJson(request)) || {}
+    const displayName = String(body.displayName ?? '').trim().replace(/ +/g, ' ')
+    if (!displayName || displayName.length > 40) return json(400, { ok: false, error: 'badName' })
+    const rec = await loadUser(kv, name)
+    if (!rec) return json(404, { ok: false, error: 'noUser' })
+    rec.displayName = displayName
+    await kv.put(USER_PREFIX + name, JSON.stringify(rec))
+    return json(200, { ok: true, displayName })
+  }
+
   // ---------- admin: data konkrétního uživatele (read-only) ----------
   if (method === 'GET' && path.startsWith('/api/admin/users/') && path.endsWith('/data')) {
     const a = parseAuth(request)
