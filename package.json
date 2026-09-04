@@ -1,0 +1,26 @@
+{
+  "name": "fit-tracker",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "build:single": "vite build --config vite.single.config.ts",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "node scripts/smoke-cf.mjs",
+    "start": "node server.mjs",
+    "serve": "npm run build && node server.mjs"
+  },
+  "dependencies": {
+    "chart.js": "^4.4.4",
+    "idb-keyval": "^6.2.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10",
+    "vite-plugin-pwa": "^0.20.5",
+    "vite-plugin-singlefile": "^2.3.3"
+  }
+}
