@@ -57,10 +57,25 @@ export function weekOffsetFor(s: string, n: number): number {
  * - weekly: on one of `weekdays`, in the `weekOffset`-th week of every N-week cycle.
  * - interval: every Nth day counting from the anchor date (anchor day included).
  */
-export function occursOn(
-  s: { kind: 'weekly' | 'interval'; every: number; weekOffset?: number; weekdays?: number[]; weekday?: number; anchor?: string | null },
-  date: string,
-): boolean {
+interface ScheduleLike {
+  kind: 'weekly' | 'interval'
+  every: number
+  weekOffset?: number
+  weekdays?: number[]
+  weekday?: number
+  anchor?: string | null
+  time?: string
+  weekTimes?: Record<string, Record<string, string | null>>
+}
+
+/** Whether an occurrence of a schedule exists on the given date.
+ *
+ * - weekly: on one of `weekdays`, in the `weekOffset`-th week of every N-week cycle.
+ *   With `weekTimes` (pokročilý rozvrh) the matrix decides: a time in cell
+ *   (weekday, week-of-cycle) means training, a missing cell means off.
+ * - interval: every Nth day counting from the anchor date (anchor day included).
+ */
+export function occursOn(s: ScheduleLike, date: string): boolean {
   if (s.kind === 'interval') {
     const anchor = s.anchor ?? ''
     if (!/^\d{4}-\d{2}-\d{2}$/.test(anchor)) return false
@@ -68,9 +83,28 @@ export function occursOn(
     return diff >= 0 && diff % s.every === 0
   }
   const weekdays = s.weekdays?.length ? s.weekdays : s.weekday != null ? [s.weekday] : []
-  if (!weekdays.includes(isoWeekday(date) - 1)) return false
+  const w = isoWeekday(date) - 1
+  const wt = s.weekTimes
+  if (wt && Object.keys(wt).length) {
+    const cell = wt[String(w)]?.[String(weekOffsetFor(date, s.every))]
+    return cell !== undefined && cell !== null
+  }
+  if (!weekdays.includes(w)) return false
   const offset = s.weekOffset ?? 1
   return weekOffsetFor(date, s.every) === offset
+}
+
+/** Efektivní plánovaný čas cvičení pro daný den (respektuje pokročilý rozvrh).
+ *  Vrací null, pokud den nepatří do rozvrhu (jen u `weekTimes`). */
+export function timeOn(s: ScheduleLike, date: string): string | null {
+  if (s.kind !== 'weekly') return s.time ?? null
+  const w = isoWeekday(date) - 1
+  const wt = s.weekTimes
+  if (wt && Object.keys(wt).length) {
+    const cell = wt[String(w)]?.[String(weekOffsetFor(date, s.every))]
+    if (cell !== undefined) return cell // null = tento den ve tomto týdnu volno
+  }
+  return s.time ?? null
 }
 
 /** "Po", "Mon", "Mo", … – short weekday of the given date. */

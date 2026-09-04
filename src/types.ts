@@ -20,6 +20,10 @@ export interface Exercise {
   time: string // "HH:MM" – planned start
   /** optional planned end "HH:MM". null => duration assumed as 1 minute for the timeline */
   endTime: string | null
+  /** Pokročilý rozvrh: den (0=Po..6=Ne) → týden cyklu (1..every) → čas "HH:MM".
+   *  Přítomnost = absolutní výběr: políčko s časem znamená trénink, chybějící = volno.
+   *  Nepřítomno = klasický rozvrh (weekdays + time). */
+  weekTimes?: Record<string, Record<string, string | null>>
   /** unit for measured value, e.g. "km", "min". null => checkbox-only exercise */
   unit: string | null
   archived: boolean

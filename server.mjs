@@ -34,7 +34,12 @@ const MIME = {
   '.txt': 'text/plain; charset=utf-8',
 }
 
-const USER_RE = /^[a-z0-9][a-z0-9._-]{1,29}$/ // 2–30 znaků, jen bezpečné znaky
+// Jméno smí obsahovat i velká písmena a mezery (zobrazované jméno); pro ukládání
+// a přihlašování se sjednocuje na malá písmena (viz normalizeUser).
+const USER_RE = /^[A-Za-z0-9][A-Za-z0-9._ -]{1,29}$/
+
+/** Kanonická podoba uživatelského jména: malá písmena, jedna mezera mezi slovy. */
+const normalizeUser = (s) => String(s ?? '').toLowerCase().replace(/ +/g, ' ').trim()
 const EMPTY_DATA = { version: 5, exercises: [], logs: [], groups: [] }
 
 // Vestavěný admin účet – vidí seznam všech uživatelů a může je mazat.
@@ -80,7 +85,7 @@ function parseAuth(req) {
     const [user, password] = Buffer.from(h.slice(7), 'base64').toString('utf8').split(':')
     // Server ukládá jména malými písmeny (viz register/login) – hlavičku sjednotíme,
     // jinak uživatel napsaný s velkým písmenem nedostane svá data (401).
-    return { user: user.toLowerCase().trim(), password }
+    return { user: normalizeUser(user), password }
   } catch {
     return null
   }
@@ -123,31 +128,32 @@ async function handleApi(req, res, url) {
   if (method === 'POST' && path === '/api/register') {
     let body = {}
     try { body = JSON.parse((await readBody(req)) || '{}') } catch { body = {} }
-    const user = String(body.username ?? '').toLowerCase().trim()
+    const raw = String(body.username ?? '').trim()
+    const user = normalizeUser(raw)
     const password = String(body.password ?? '')
-    if (!USER_RE.test(user)) return json(res, 400, { ok: false, error: 'invalidUser' })
+    if (!USER_RE.test(user) || !USER_RE.test(raw)) return json(res, 400, { ok: false, error: 'invalidUser' })
     if (user === ADMIN_USER) return json(res, 409, { ok: false, error: 'adminReserved' })
     if (password.length < 1) return json(res, 400, { ok: false, error: 'invalidPass' })
     const p = userFile(user)
     if (await fileExists(p)) return json(res, 409, { ok: false, error: 'userTaken' })
-    await writeJsonAtomic(p, { username: user, password, data: EMPTY_DATA })
-    console.log(`[auth] nový účet: ${user}`)
-    return json(res, 200, { ok: true, data: EMPTY_DATA })
+    await writeJsonAtomic(p, { username: user, displayName: raw.replace(/ +/g, ' '), password, data: EMPTY_DATA })
+    console.log(`[auth] nový účet: ${user} (${raw})`)
+    return json(res, 200, { ok: true, data: EMPTY_DATA, displayName: raw.replace(/ +/g, ' ') })
   }
 
   // Přihlášení – vrátí data uživatele (admin nemá vlastní datový soubor)
   if (method === 'POST' && path === '/api/login') {
     let body = {}
     try { body = JSON.parse((await readBody(req)) || '{}') } catch { body = {} }
-    const user = String(body.username ?? '').toLowerCase().trim()
+    const user = normalizeUser(body.username)
     const password = String(body.password ?? '')
     if (isAdminCreds(user, password)) {
       console.log(`[auth] přihlášen admin`)
-      return json(res, 200, { ok: true, data: EMPTY_DATA })
+      return json(res, 200, { ok: true, data: EMPTY_DATA, displayName: 'Admin' })
     }
     const rec = await loadUser(user)
     if (!rec || rec.password !== password) return json(res, 401, { ok: false, error: 'wrongCreds' })
-    return json(res, 200, { ok: true, data: rec.data })
+    return json(res, 200, { ok: true, data: rec.data, displayName: rec.displayName ?? rec.username })
   }
 
   // Načtení / uložení dat – vyžaduje Bearer token
@@ -155,7 +161,7 @@ async function handleApi(req, res, url) {
     const a = parseAuth(req)
     if (a && isAdminCreds(a.user, a.password)) {
       // Admin nemá tréninková data – vrátí prázdná, PUT ignoruje.
-      if (method === 'GET') return json(res, 200, { ok: true, data: EMPTY_DATA })
+      if (method === 'GET') return json(res, 200, { ok: true, data: EMPTY_DATA, displayName: 'Admin' })
       if (method === 'PUT') {
         await readBody(req)
         return json(res, 200, { ok: true })
@@ -165,7 +171,9 @@ async function handleApi(req, res, url) {
     if (!rec || !a || rec.password !== a.password) {
       return json(res, 401, { ok: false, error: 'wrongCreds' })
     }
-    if (method === 'GET') return json(res, 200, { ok: true, data: rec.data })
+    if (method === 'GET') {
+      return json(res, 200, { ok: true, data: rec.data, displayName: rec.displayName ?? rec.username })
+    }
     if (method === 'PUT') {
       let body = {}
       try { body = JSON.parse((await readBody(req)) || '{}') } catch { body = {} }
@@ -190,8 +198,10 @@ async function handleApi(req, res, url) {
         try {
           const rec = JSON.parse(await readFile(p, 'utf8'))
           const st = await stat(p)
+          const username = String(rec.username ?? n.slice(0, -5))
           users.push({
-            username: String(rec.username ?? n.slice(0, -5)),
+            username,
+            displayName: String(rec.displayName ?? username),
             exercises: Array.isArray(rec.data?.exercises) ? rec.data.exercises.length : 0,
             logs: Array.isArray(rec.data?.logs) ? rec.data.logs.length : 0,
             updatedAt: st.mtime.toISOString(),
@@ -207,7 +217,7 @@ async function handleApi(req, res, url) {
   if (method === 'GET' && path.startsWith('/api/admin/users/') && path.endsWith('/data')) {
     const a = parseAuth(req)
     if (!a || !isAdminCreds(a.user, a.password)) return json(res, 401, { ok: false, error: 'wrongCreds' })
-    const name = decodeURIComponent(path.slice('/api/admin/users/'.length, -'/data'.length))
+    const name = normalizeUser(decodeURIComponent(path.slice('/api/admin/users/'.length, -'/data'.length)))
     if (!USER_RE.test(name) || name === ADMIN_USER) return json(res, 400, { ok: false, error: 'badName' })
     const rec = await loadUser(name)
     if (!rec) return json(res, 404, { ok: false, error: 'noUser' })
@@ -219,7 +229,7 @@ async function handleApi(req, res, url) {
   if (method === 'DELETE' && path.startsWith('/api/admin/users/')) {
     const a = parseAuth(req)
     if (!a || !isAdminCreds(a.user, a.password)) return json(res, 401, { ok: false, error: 'wrongCreds' })
-    const name = decodeURIComponent(path.slice('/api/admin/users/'.length))
+    const name = normalizeUser(decodeURIComponent(path.slice('/api/admin/users/'.length)))
     if (!USER_RE.test(name)) return json(res, 400, { ok: false, error: 'badName' })
     if (name === ADMIN_USER) return json(res, 400, { ok: false, error: 'badName' })
     const p = userFile(name)

@@ -51,14 +51,14 @@ export function clearSession(): void {
   localStorage.removeItem(SESSION_KEY)
 }
 
-async function request<T>(path: string, init: RequestInit): Promise<T> {
+async function request<T>(path: string, init: RequestInit): Promise<{ data: T; displayName?: string }> {
   let res: Response
   try {
     res = await fetch(apiBase() + path, init)
   } catch {
     throw new Error('errNetwork')
   }
-  let body: { ok?: boolean; error?: string; data?: T } = {}
+  let body: { ok?: boolean; error?: string; data?: T; displayName?: string } = {}
   try {
     body = await res.json()
   } catch {
@@ -67,27 +67,34 @@ async function request<T>(path: string, init: RequestInit): Promise<T> {
   if (!res.ok || !body.ok) {
     throw new Error(body.error ?? `http ${res.status}`)
   }
-  return body.data as T
+  return { data: body.data as T, displayName: body.displayName }
 }
 
-export function apiRegister(username: string, password: string): Promise<AppData> {
+/** Data přihlášeného uživatele + zobrazované jméno (jak ho zadal při registraci). */
+export interface AuthData {
+  data: AppData
+  displayName: string
+}
+
+export function apiRegister(username: string, password: string): Promise<AuthData> {
   return request<AppData>('/api/register', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username, password }),
-  })
+  }).then((r) => ({ data: r.data, displayName: r.displayName ?? '' }))
 }
 
-export function apiLogin(username: string, password: string): Promise<AppData> {
+export function apiLogin(username: string, password: string): Promise<AuthData> {
   return request<AppData>('/api/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ username, password }),
-  })
+  }).then((r) => ({ data: r.data, displayName: r.displayName ?? '' }))
 }
 
-export function apiGetData(s: Session): Promise<AppData> {
+export function apiGetData(s: Session): Promise<AuthData> {
   return request<AppData>('/api/data', { headers: { Authorization: authHeader(s) } })
+    .then((r) => ({ data: r.data, displayName: r.displayName ?? '' }))
 }
 
 export function apiPutData(s: Session, data: AppData): Promise<void> {
@@ -95,7 +102,7 @@ export function apiPutData(s: Session, data: AppData): Promise<void> {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', Authorization: authHeader(s) },
     body: JSON.stringify(data),
-  })
+  }).then(() => undefined)
 }
 
 /* ---------------------------- admin ---------------------------- */
@@ -110,13 +117,14 @@ export interface AdminUserInfo {
 /** Seznam všech účtů (jen pro admina). */
 export function apiAdminUsers(s: Session): Promise<AdminUserInfo[]> {
   return request<AdminUserInfo[]>('/api/admin/users', { headers: { Authorization: authHeader(s) } })
+    .then((r) => r.data)
 }
 
 /** Tréninková data konkrétního uživatele (jen pro admina, read-only přehled). */
 export function apiAdminUserData(s: Session, username: string): Promise<AppData> {
   return request<AppData>(`/api/admin/users/${encodeURIComponent(username)}/data`, {
     headers: { Authorization: authHeader(s) },
-  })
+  }).then((r) => r.data)
 }
 
 /** Smazání účtu včetně jeho dat (jen pro admina). */
@@ -124,5 +132,5 @@ export function apiAdminDeleteUser(s: Session, username: string): Promise<void> 
   return request<void>(`/api/admin/users/${encodeURIComponent(username)}`, {
     method: 'DELETE',
     headers: { Authorization: authHeader(s) },
-  })
+  }).then(() => undefined)
 }

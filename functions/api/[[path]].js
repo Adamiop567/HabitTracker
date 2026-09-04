@@ -11,7 +11,12 @@
  * Klíče ve KV: `u:<uzivatel>` → JSON { username, password, updatedAt, data }
  */
 
-const USER_RE = /^[a-z0-9][a-z0-9._-]{1,29}$/ // 2–30 znaků, jen bezpečné znaky
+// Jméno smí obsahovat i velká písmena a mezery (zobrazované jméno); pro ukládání
+// a přihlašování se sjednocuje na malá písmena (viz normalizeUser).
+const USER_RE = /^[A-Za-z0-9][A-Za-z0-9._ -]{1,29}$/
+
+/** Kanonická podoba uživatelského jména: malá písmena, jedna mezera mezi slovy. */
+const normalizeUser = (s) => String(s ?? '').toLowerCase().replace(/ +/g, ' ').trim()
 const EMPTY_DATA = { version: 5, exercises: [], logs: [], groups: [] }
 const ADMIN_USER = 'admin'
 const ADMIN_PASS = 'Adam,,22'
@@ -48,7 +53,7 @@ function parseAuth(request) {
     const [user, password] = b64decode(h.slice(7)).split(':')
     // Server ukládá jména malými písmeny (viz register/login) – hlavičku sjednotíme,
     // jinak uživatel napsaný s velkým písmenem nedostane svá data (401).
-    return { user: user.toLowerCase().trim(), password }
+    return { user: normalizeUser(user), password }
   } catch {
     return null
   }
@@ -84,33 +89,35 @@ async function handleApi(request, env, url) {
   // ---------- registrace ----------
   if (method === 'POST' && path === '/api/register') {
     const body = (await readJson(request)) || {}
-    const user = String(body.username ?? '').toLowerCase().trim()
+    const raw = String(body.username ?? '').trim()
+    const user = normalizeUser(raw)
     const password = String(body.password ?? '')
-    if (!USER_RE.test(user)) return json(400, { ok: false, error: 'invalidUser' })
+    if (!USER_RE.test(user) || !USER_RE.test(raw)) return json(400, { ok: false, error: 'invalidUser' })
     if (user === ADMIN_USER) return json(409, { ok: false, error: 'adminReserved' })
     if (password.length < 1) return json(400, { ok: false, error: 'invalidPass' })
     const key = USER_PREFIX + user
     if ((await kv.get(key)) != null) return json(409, { ok: false, error: 'userTaken' })
     await kv.put(key, JSON.stringify({
       username: user,
+      displayName: raw.replace(/ +/g, ' '),
       password,
       updatedAt: new Date().toISOString(),
       data: EMPTY_DATA,
     }))
-    return json(200, { ok: true, data: EMPTY_DATA })
+    return json(200, { ok: true, data: EMPTY_DATA, displayName: raw.replace(/ +/g, ' ') })
   }
 
   // ---------- přihlášení ----------
   if (method === 'POST' && path === '/api/login') {
     const body = (await readJson(request)) || {}
-    const user = String(body.username ?? '').toLowerCase().trim()
+    const user = normalizeUser(body.username)
     const password = String(body.password ?? '')
     if (isAdminCreds(user, password)) {
-      return json(200, { ok: true, data: EMPTY_DATA })
+      return json(200, { ok: true, data: EMPTY_DATA, displayName: 'Admin' })
     }
     const rec = await loadUser(kv, user)
     if (!rec || rec.password !== password) return json(401, { ok: false, error: 'wrongCreds' })
-    return json(200, { ok: true, data: rec.data })
+    return json(200, { ok: true, data: rec.data, displayName: rec.displayName ?? rec.username })
   }
 
   // ---------- načtení / uložení dat ----------
@@ -118,7 +125,7 @@ async function handleApi(request, env, url) {
     const a = parseAuth(request)
     if (a && isAdminCreds(a.user, a.password)) {
       // Admin nemá tréninková data.
-      if (method === 'GET') return json(200, { ok: true, data: EMPTY_DATA })
+      if (method === 'GET') return json(200, { ok: true, data: EMPTY_DATA, displayName: 'Admin' })
       if (method === 'PUT') {
         await readJson(request)
         return json(200, { ok: true })
@@ -128,7 +135,9 @@ async function handleApi(request, env, url) {
     if (!rec || !a || rec.password !== a.password) {
       return json(401, { ok: false, error: 'wrongCreds' })
     }
-    if (method === 'GET') return json(200, { ok: true, data: rec.data })
+    if (method === 'GET') {
+      return json(200, { ok: true, data: rec.data, displayName: rec.displayName ?? rec.username })
+    }
     if (method === 'PUT') {
       const body = await readJson(request)
       if (!body || typeof body !== 'object' || !Array.isArray(body.exercises) || !Array.isArray(body.logs)) {
@@ -153,8 +162,10 @@ async function handleApi(request, env, url) {
       try {
         const rec = JSON.parse(raw)
         const data = rec.data && typeof rec.data === 'object' ? rec.data : {}
+        const username = String(rec.username ?? name.slice(USER_PREFIX.length))
         users.push({
-          username: String(rec.username ?? name.slice(USER_PREFIX.length)),
+          username,
+          displayName: String(rec.displayName ?? username),
           exercises: Array.isArray(data.exercises) ? data.exercises.length : 0,
           logs: Array.isArray(data.logs) ? data.logs.length : 0,
           updatedAt: typeof rec.updatedAt === 'string' ? rec.updatedAt : null,
@@ -171,7 +182,7 @@ async function handleApi(request, env, url) {
   if (method === 'GET' && path.startsWith('/api/admin/users/') && path.endsWith('/data')) {
     const a = parseAuth(request)
     if (!a || !isAdminCreds(a.user, a.password)) return json(401, { ok: false, error: 'wrongCreds' })
-    const name = decodeURIComponent(path.slice('/api/admin/users/'.length, -'/data'.length))
+    const name = normalizeUser(decodeURIComponent(path.slice('/api/admin/users/'.length, -'/data'.length)))
     if (!USER_RE.test(name) || name === ADMIN_USER) return json(400, { ok: false, error: 'badName' })
     const rec = await loadUser(kv, name)
     if (!rec) return json(404, { ok: false, error: 'noUser' })
@@ -182,7 +193,7 @@ async function handleApi(request, env, url) {
   if (method === 'DELETE' && path.startsWith('/api/admin/users/')) {
     const a = parseAuth(request)
     if (!a || !isAdminCreds(a.user, a.password)) return json(401, { ok: false, error: 'wrongCreds' })
-    const name = decodeURIComponent(path.slice('/api/admin/users/'.length))
+    const name = normalizeUser(decodeURIComponent(path.slice('/api/admin/users/'.length)))
     if (!USER_RE.test(name) || name === ADMIN_USER) return json(400, { ok: false, error: 'badName' })
     const key = USER_PREFIX + name
     if ((await kv.get(key)) == null) return json(404, { ok: false, error: 'noUser' })

@@ -107,6 +107,8 @@ function normalize(raw: { exercises?: unknown[]; logs?: unknown[]; groups?: unkn
       time: typeof r.time === 'string' && /^\d{2}:\d{2}$/.test(r.time) ? r.time : '08:00',
       endTime:
         typeof r.endTime === 'string' && /^\d{2}:\d{2}$/.test(r.endTime) ? r.endTime : null,
+      // v6: pokročilý rozvrh (den → týden cyklu → čas). Předává se beze změny, jen se očistí.
+      weekTimes: normWeekTimes(r.weekTimes),
       unit: typeof r.unit === 'string' && r.unit.trim() ? r.unit : null,
       archived: !!r.archived,
       createdAt: typeof r.createdAt === 'string' && r.createdAt ? r.createdAt : new Date().toISOString(),
@@ -153,6 +155,26 @@ function normalize(raw: { exercises?: unknown[]; logs?: unknown[]; groups?: unkn
       }
     })
   return { version: DATA_VERSION, exercises, logs, groups }
+}
+
+/** Čisté předání pokročilého rozvrhu: den 0..6 → týden cyklu 1..N → "HH:MM" | null. */
+function normWeekTimes(raw: unknown): Record<string, Record<string, string | null>> | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+  const out: Record<string, Record<string, string | null>> = {}
+  for (const [d, cols] of Object.entries(raw as Record<string, unknown>)) {
+    const day = Number(d)
+    if (!Number.isInteger(day) || day < 0 || day > 6) continue
+    if (!cols || typeof cols !== 'object' || Array.isArray(cols)) continue
+    const cell: Record<string, string | null> = {}
+    for (const [c, v] of Object.entries(cols as Record<string, unknown>)) {
+      const col = Number(c)
+      if (!Number.isInteger(col) || col < 1 || col > 365) continue
+      if (v === null || v === undefined) { cell[String(col)] = null; continue }
+      if (typeof v === 'string' && /^\d{2}:\d{2}$/.test(v)) cell[String(col)] = v
+    }
+    if (Object.keys(cell).length) out[String(day)] = cell
+  }
+  return Object.keys(out).length ? out : undefined
 }
 
 /* ----------------------------- JSON file I/O ----------------------------- */

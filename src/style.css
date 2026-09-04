@@ -478,3 +478,12 @@ tr.day-row:hover { background: var(--row-hover); }
   table.week th:nth-child(3), table.week td:nth-child(3) { display: none; }
   .toolbar .week-label { min-width: 0; font-size: 0.92rem; }
 }
+
+/* pokročilý rozvrh cvičení (dny × týdny cyklu) */
+.adv-wrap { margin-top: 6px; }
+.adv-label { display: flex; align-items: center; gap: 8px; font-weight: 600; cursor: pointer; }
+.sched-grid { display: grid; gap: 4px; align-items: center; margin-top: 10px; overflow-x: auto; padding-bottom: 4px; }
+.sched-head { font-size: 0.75rem; opacity: 0.6; text-align: center; white-space: nowrap; }
+.sched-day { font-size: 0.85rem; white-space: nowrap; }
+.sched-cell { min-width: 0; width: 100%; padding: 5px 6px; }
+.sched-now { outline: 1px solid var(--accent); border-radius: 4px; }

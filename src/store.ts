@@ -16,6 +16,8 @@ class Store {
   currentWeekMonday: string
   /** Přihlášený uživatel (null = přihlašovací obrazovka). */
   user: string | null = null
+  /** Zobrazované jméno uživatele (jak ho zadal při registraci), např. „Sir Jonathan“. */
+  displayName: string | null = null
   /** Stav synchronizace se serverem: null = zatím nic, true/false = poslední pokus. */
   syncOk: boolean | null = null
   fileHandle: FsFileHandle | null = null
@@ -38,13 +40,13 @@ class Store {
   /* ------------------------- přihlášení / účty ------------------------- */
 
   async login(username: string, password: string): Promise<void> {
-    const data = await apiLogin(username, password)
-    await this.activateUser(username, password, data)
+    const r = await apiLogin(username, password)
+    await this.activateUser(username, password, r.data, r.displayName)
   }
 
   async register(username: string, password: string): Promise<void> {
-    const data = await apiRegister(username, password)
-    await this.activateUser(username, password, data)
+    const r = await apiRegister(username, password)
+    await this.activateUser(username, password, r.data, r.displayName)
   }
 
   /** Je přihlášený vestavěný admin účet? */
@@ -58,9 +60,10 @@ class Store {
     if (!session) return
     this.user = session.username
     try {
-      const data = await apiGetData(session)
+      const r = await apiGetData(session)
+      this.displayName = r.displayName || null
       this.syncOk = true
-      await this.commit(data)
+      await this.commit(r.data)
     } catch {
       // Server nedostupný – použijeme offline cache daného uživatele.
       this.syncOk = false
@@ -68,11 +71,12 @@ class Store {
     }
   }
 
-  private async activateUser(username: string, password: string, serverData: AppData): Promise<void> {
+  private async activateUser(username: string, password: string, serverData: AppData, displayName = ''): Promise<void> {
     // Server ukládá jména malými písmeny (ořezané) – session i Authorization hlavička
     // musí používat stejnou podobu, jinak se data uživatele nenačtou/neuloží (401).
-    const user = username.toLowerCase().trim()
+    const user = username.toLowerCase().replace(/ +/g, ' ').trim()
     this.user = user
+    this.displayName = displayName || null
     saveSession({ username: user, password })
     this.syncOk = true
     // Prázdný nový účet dostane data, která už v tomto zařízení byla (migrace).
@@ -92,6 +96,7 @@ class Store {
 
   async logout(): Promise<void> {
     this.user = null
+    this.displayName = null
     this.syncOk = null
     clearSession()
     this.pendingSync = null

@@ -5,7 +5,7 @@ import {
   dayStats, exerciseHistory, logFor, manualLogsForDay, planForDay,
   volumeByWeek, weekLabel, weekTotals, activeExercises, type DayStats,
 } from './aggregate'
-import { addDays, formatDay, humanDate, mondayOf, weekdayFull, weekOffsetFor } from './dates'
+import { addDays, formatDay, humanDate, mondayOf, timeOn, weekdayFull, weekOffsetFor } from './dates'
 import { LANGS, LANG_LABELS, getLang, setLang, t, weekdaysFull, weekdaysShort } from './i18n'
 import { apiAdminDeleteUser, apiAdminUserData, apiAdminUsers, getSession, type AdminUserInfo } from './api'
 import { downloadJson, FILE_NAME, parseJsonFile } from './storage'
@@ -70,6 +70,8 @@ function renderWeek(root: HTMLElement): void {
     const date = addDays(monday, i)
     const st = dayStats(d, date, store.today)
     const plan = planForDay(d, date)
+      .slice()
+      .sort((a, b) => exTimeOn(a, date).localeCompare(exTimeOn(b, date)))
     const isToday = date === store.today
     const isPast = date < store.today
 
@@ -97,7 +99,7 @@ function renderWeek(root: HTMLElement): void {
             h('div', {},
               h('span', { class: 'ex-dot', style: `background:${ex.color}` }),
               `${ex.name} `,
-              h('span', { class: 'chev' }, timeRange(ex)),
+              h('span', { class: 'chev' }, timeRangeOn(ex, date)),
             )),
           ...extras.map((ex) =>
             h('div', { class: 'ex-extra' },
@@ -141,15 +143,26 @@ function minToTime(m: number): string {
   return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`
 }
 
+/** Plánovaný začátek pro konkrétní den (pokročilý rozvrh: den/týden). */
+function exTimeOn(ex: Exercise, date: string): string {
+  return timeOn(ex, date) ?? ex.time
+}
+
 /** Planned end in minutes; exercises without endTime get a 1-minute duration. */
-function exEndMin(ex: Exercise): number {
-  const start = timeToMin(ex.time)
+function exEndMin(ex: Exercise, date: string): number {
+  const start = timeToMin(exTimeOn(ex, date))
   return ex.endTime ? Math.max(timeToMin(ex.endTime), start + 1) : start + 1
 }
 
 /** "08:00" or "08:00–09:00" (start only when no end time is set). */
 function timeRange(ex: Exercise): string {
   return ex.endTime ? `${ex.time}–${ex.endTime}` : ex.time
+}
+
+/** "08:00" nebo „08:00–09:00“ pro konkrétní den (pokročilý rozvrh). */
+function timeRangeOn(ex: Exercise, date: string): string {
+  const t = exTimeOn(ex, date)
+  return ex.endTime ? `${t}–${ex.endTime}` : t
 }
 
 function gapLabel(mins: number): string {
@@ -160,9 +173,9 @@ function gapLabel(mins: number): string {
 }
 
 /** Timeline "frame": the day's activities laid out on a time axis (order + gaps). */
-function renderTimeline(root: HTMLElement, exs: Exercise[]): void {
+function renderTimeline(root: HTMLElement, exs: Exercise[], date: string): void {
   const items = exs
-    .map((ex) => ({ ex, start: timeToMin(ex.time), end: exEndMin(ex) }))
+    .map((ex) => ({ ex, start: timeToMin(exTimeOn(ex, date)), end: exEndMin(ex, date) }))
     .sort((a, b) => a.start - b.start || a.ex.name.localeCompare(b.ex.name))
   if (items.length === 0) return
 
@@ -195,7 +208,7 @@ function renderTimeline(root: HTMLElement, exs: Exercise[]): void {
     }
     const left = pct(it.start)
     const width = Math.max(pct(it.end) - left, 1.3)
-    const label = timeRange(it.ex)
+    const label = timeRangeOn(it.ex, date)
     bar.append(h('div', {
       class: 'timeline-block',
       style: `left:${left}%;width:${width}%;background:${it.ex.color}2e;border-color:${it.ex.color}`,
@@ -259,7 +272,7 @@ function logCard(date: string, ex: Exercise, extra = false): HTMLElement {
     h('div', {},
       h('span', { class: 'ex-dot', style: `background:${ex.color}` }),
       h('span', { class: 'ex-name' }, ex.name),
-      h('span', { class: 'time-chip' }, timeRange(ex)),
+      h('span', { class: 'time-chip' }, timeRangeOn(ex, date)),
     ),
     ex.unit
       ? h('div', { class: 'value-row' },
@@ -311,7 +324,7 @@ function renderDay(root: HTMLElement, date: string): void {
     .filter((e): e is Exercise => !!e && !e.archived)
 
   // timeline: order of the day's activities and the gaps between them
-  renderTimeline(root, [...plan, ...extraExs])
+  renderTimeline(root, [...plan, ...extraExs], date)
 
   if (plan.length === 0 && extraExs.length === 0) {
     root.append(h('div', { class: 'notice' }, t('dayEmptyNotice')))
@@ -598,6 +611,7 @@ function openGroupEditor(g: ExerciseGroup | null): void {
 /* ============================== EXERCISES VIEW ============================== */
 
 function scheduleText(ex: Exercise): string {
+  if (ex.weekTimes && Object.keys(ex.weekTimes).length) return t('advSummary')
   if (ex.kind === 'interval') {
     return ex.every === 1 ? t('everyDaily') : t('everyNDays', { n: ex.every })
   }
@@ -732,6 +746,91 @@ function openExerciseModal(existing: Exercise | null): void {
     weekChips,
     h('div', { class: 'hint' }, t('weekCycleHint')),
   )
+
+  /* ---- pokročilý rozvrh: časy podle dnů × týdnů cyklu (absolutní výběr) ---- */
+  const advToggle = h('input', {
+    type: 'checkbox',
+    checked: !!(ex?.weekTimes && Object.keys(ex.weekTimes).length),
+  })
+  const advNow = h('div', { class: 'hint' }, '')
+  const schedGrid = h('div', { class: 'sched-grid', style: 'display:none' })
+  const advWrap = h('div', { class: 'full adv-wrap' },
+    h('label', { class: 'adv-label' }, advToggle, ' ', t('advLabel')),
+    h('div', { class: 'hint' }, t('advHint')),
+    advNow,
+    schedGrid,
+  )
+  /** cols[d][c] = čas buňky (den d, sloupec c) nebo '' = volno. */
+  const cols: string[][] = []
+
+  function everyVal(): number {
+    return Math.min(365, Math.max(1, Math.floor(Number((everyNum as HTMLInputElement).value) || 1)))
+  }
+
+  function fillCols(): void {
+    const n = everyVal()
+    for (let d = 0; d < 7; d++) {
+      if (!cols[d]) cols[d] = []
+      cols[d].length = n + 1
+      for (let c = 1; c <= n; c++) if (cols[d][c] === undefined) cols[d][c] = ''
+    }
+    const wt = ex?.weekTimes
+    if (wt) {
+      for (const [dd, by] of Object.entries(wt)) {
+        const d = Number(dd)
+        if (d < 0 || d > 6) continue
+        for (const [cc, v] of Object.entries(by)) {
+          const c = Number(cc)
+          if (c < 1 || c > n) continue
+          cols[d][c] = v === null ? '' : v
+        }
+      }
+    }
+  }
+  fillCols()
+
+  function renderGrid(): void {
+    const kind = (kindSel as HTMLSelectElement).value
+    const on = (advToggle as HTMLInputElement).checked && kind === 'weekly'
+    ;(advWrap as HTMLElement).style.display = kind === 'weekly' ? '' : 'none'
+    ;(schedGrid as HTMLElement).style.display = on ? '' : 'none'
+    if (!on) return
+    const n = everyVal()
+    fillCols()
+    const cur = weekOffsetFor(store.today, n)
+    advNow.textContent = t('advWeekNow', { n: cur })
+    ;(schedGrid as HTMLElement).style.gridTemplateColumns = `auto repeat(${n}, minmax(88px, 1fr))`
+    schedGrid.innerHTML = ''
+    schedGrid.append(h('div', { class: 'sched-head' }, ''))
+    const wk = t('weekShort')
+    for (let c = 1; c <= n; c++) {
+      schedGrid.append(h('div', { class: 'sched-head' + (c === cur ? ' sched-now' : '') }, `${wk} ${c}`))
+    }
+    weekdaysFull().forEach((wd, d) => {
+      schedGrid.append(h('div', { class: 'sched-day' }, wd))
+      for (let c = 1; c <= n; c++) {
+        schedGrid.append(h('input', {
+          type: 'time',
+          class: 'sched-cell' + (c === cur ? ' sched-now' : ''),
+          value: cols[d][c] ?? '',
+          oninput: (e: Event) => { cols[d][c] = (e.target as HTMLInputElement).value },
+        }))
+      }
+    })
+  }
+
+  advToggle.addEventListener('change', () => {
+    if ((advToggle as HTMLInputElement).checked && !(ex?.weekTimes && Object.keys(ex.weekTimes).length)) {
+      const t0 = (timeIn as HTMLInputElement).value || '08:00'
+      const n = everyVal()
+      for (let d = 0; d < 7; d++) {
+        if (!cols[d]) cols[d] = []
+        for (let c = 1; c <= n; c++) if (!cols[d][c]) cols[d][c] = t0
+      }
+    }
+    renderGrid()
+  })
+
   let weekOffsetChoice = ex ? Math.min(ex.every, Math.max(1, ex.weekOffset ?? 1)) : 1
   let choiceN = ex ? ex.every : -1
 
@@ -755,6 +854,7 @@ function openExerciseModal(existing: Exercise | null): void {
       }, String(i))
       weekChips.append(chip)
     }
+    renderGrid()
   }
 
   function updateKind(): void {
@@ -762,9 +862,11 @@ function openExerciseModal(existing: Exercise | null): void {
     const isWeekly = kind === 'weekly'
     ;(weekdayField as HTMLElement).style.display = isWeekly ? '' : 'none'
     everyHint.textContent = isWeekly ? t('everyWeeklyHint') : t('everyMonthlyHint')
+    renderGrid()
   }
   updateKind()
   updateWeekCycle()
+  renderGrid()
 
   const body = [
     h('div', { class: 'form-grid' },
@@ -777,6 +879,7 @@ function openExerciseModal(existing: Exercise | null): void {
       everyField,
       weekdayField,
       weekCycleField,
+      advWrap,
       h('div', {}, h('label', {}, t('timeLabel')), timeIn),
       h('div', {},
         h('label', {}, t('endTimeLabel')), endIn,
@@ -800,6 +903,20 @@ function openExerciseModal(existing: Exercise | null): void {
       if (weekdays.length === 0) weekdays = [0]
     }
     const unitV = (unitIn as HTMLInputElement).value.trim()
+    // Pokročilý rozvrh: vyplněné buňky mřížky → weekTimes, jinak klasický rozvrh.
+    let weekTimes: Exercise['weekTimes']
+    if (kind === 'weekly' && (advToggle as HTMLInputElement).checked) {
+      const wt: NonNullable<Exercise['weekTimes']> = {}
+      for (let d = 0; d < 7; d++) {
+        const cells: Record<string, string | null> = {}
+        for (let c = 1; c <= every; c++) {
+          const v = (cols[d]?.[c] ?? '').trim()
+          if (v) cells[String(c)] = v
+        }
+        if (Object.keys(cells).length) wt[String(d)] = cells
+      }
+      if (Object.keys(wt).length) weekTimes = wt
+    }
     const payload = {
       name: nameV,
       color: colorChoice,
@@ -811,6 +928,7 @@ function openExerciseModal(existing: Exercise | null): void {
       time: (timeIn as HTMLInputElement).value || '08:00',
       endTime: (endIn as HTMLInputElement).value || null,
       unit: unitV ? unitV : null,
+      weekTimes,
     }
     void (ex ? store.updateExercise(ex.id, payload) : store.addExercise(payload)).then(closeModal)
   }
@@ -1308,7 +1426,7 @@ export function renderApp(root: HTMLElement): void {
     h('h1', {}, '🏋️ Habit Tracker'),
     h('div', { class: 'header-actions' },
       h('div', { class: 'header-user' },
-        h('span', { class: 'user-chip', title: t('loggedInAs') }, `👤 ${store.user}`),
+        h('span', { class: 'user-chip', title: t('loggedInAs') }, `👤 ${store.displayName ?? store.user}`),
         syncIndicator(),
         h('button', { class: 'btn small ghost', onclick: () => void store.logout() }, t('logout')),
       ),
