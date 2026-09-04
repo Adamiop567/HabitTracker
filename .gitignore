@@ -4,3 +4,4 @@ dist-single/
 data/
 .DS_Store
 .freebuff/
+.wrangler/
