@@ -46,7 +46,9 @@ function parseAuth(request) {
   if (!h.startsWith('Bearer ')) return null
   try {
     const [user, password] = b64decode(h.slice(7)).split(':')
-    return { user, password }
+    // Server ukládá jména malými písmeny (viz register/login) – hlavičku sjednotíme,
+    // jinak uživatel napsaný s velkým písmenem nedostane svá data (401).
+    return { user: user.toLowerCase().trim(), password }
   } catch {
     return null
   }

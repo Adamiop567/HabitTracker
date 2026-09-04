@@ -62,14 +62,18 @@ class Store {
       this.syncOk = true
       await this.commit(data)
     } catch {
-      // Server nedostupný – necháme lokální cache, aplikace funguje offline.
+      // Server nedostupný – použijeme offline cache daného uživatele.
       this.syncOk = false
+      this.data = await loadData(this.user)
     }
   }
 
   private async activateUser(username: string, password: string, serverData: AppData): Promise<void> {
-    this.user = username
-    saveSession({ username, password })
+    // Server ukládá jména malými písmeny (ořezané) – session i Authorization hlavička
+    // musí používat stejnou podobu, jinak se data uživatele nenačtou/neuloží (401).
+    const user = username.toLowerCase().trim()
+    this.user = user
+    saveSession({ username: user, password })
     this.syncOk = true
     // Prázdný nový účet dostane data, která už v tomto zařízení byla (migrace).
     if (serverData.exercises.length === 0 && serverData.logs.length === 0 && serverData.groups.length === 0) {
@@ -77,7 +81,7 @@ class Store {
       if (legacy && (legacy.exercises.length || legacy.logs.length || legacy.groups.length)) {
         serverData = legacy
         try {
-          await apiPutData({ username, password }, serverData)
+          await apiPutData({ username: user, password }, serverData)
         } catch {
           this.syncOk = false
         }

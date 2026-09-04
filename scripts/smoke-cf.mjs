@@ -81,6 +81,16 @@ check('špatný tvar dat → 400 badData', r.status === 400 && r.data.error === 
 r = await call('GET', '/api/data', { auth: 'admin:Adam,,22' })
 check('admin GET /api/data → prázdná data', r.status === 200 && r.data.data.exercises.length === 0)
 
+console.log('— jméno s velkým písmenem / mezerami v hlavičce')
+r = await call('POST', '/api/register', { body: { username: 'Petr', password: 'heslo2' } })
+check('registrace Petr → 200 (server uloží petr)', r.status === 200)
+r = await call('GET', '/api/data', { auth: 'Petr:heslo2' })
+check('GET s hlavičkou Petr → 200 (ne 401)', r.status === 200 && Array.isArray(r.data.data.exercises))
+r = await call('PUT', '/api/data', { auth: 'PETR  :heslo2', body: SAMPLE })
+check('PUT s hlavičkou PETR + mezery → 200', r.status === 200 && r.data.ok)
+r = await call('DELETE', '/api/admin/users/petr', { auth: A })
+check('úklid petr → 200', r.status === 200)
+
 console.log('— admin: seznam účtů')
 r = await call('GET', '/api/admin/users')
 check('bez auth → 401', r.status === 401)
