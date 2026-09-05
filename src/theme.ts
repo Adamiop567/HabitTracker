@@ -13,7 +13,7 @@ export interface ThemeDef {
 export const THEMES: ThemeDef[] = [
   { id: 'dark', icon: '🌙' },
   { id: 'light', icon: '☀️' },
-  { id: 'loki', icon: '👑', name: 'SIr Jonathan' },
+  { id: 'loki', icon: '👑', name: 'Sir Jonathan' },
   { id: 'dionysus', icon: '🍇', name: 'Dionysus' },
   { id: 'garmadon', icon: '🐍', name: 'Lord Garmadon' },
 ]
