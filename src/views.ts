@@ -5,7 +5,7 @@ import {
   dayStats, exerciseHistory, logFor, manualLogsForDay, planForDay,
   volumeByWeek, weekLabel, weekTotals, activeExercises, type DayStats,
 } from './aggregate'
-import { addDays, formatDay, humanDate, mondayOf, timeOn, weekColumn, weekdayFull, weekOffsetFor } from './dates'
+import { addDays, endOn, formatDay, humanDate, mondayOf, timeOn, weekColumn, weekdayFull, weekOffsetFor } from './dates'
 import { LANGS, LANG_LABELS, getLang, setLang, t, weekdaysFull, weekdaysShort } from './i18n'
 import { apiAdminDeleteUser, apiAdminUserData, apiAdminUsers, getSession, type AdminUserInfo } from './api'
 import { downloadJson, FILE_NAME, parseJsonFile } from './storage'
@@ -148,10 +148,11 @@ function exTimeOn(ex: Exercise, date: string): string {
   return timeOn(ex, date) ?? ex.time
 }
 
-/** Planned end in minutes; exercises without endTime get a 1-minute duration. */
+/** Planned end in minutes; exercises without an end time get a 1-minute duration. */
 function exEndMin(ex: Exercise, date: string): number {
   const start = timeToMin(exTimeOn(ex, date))
-  return ex.endTime ? Math.max(timeToMin(ex.endTime), start + 1) : start + 1
+  const e = endOn(ex, date)
+  return e ? Math.max(timeToMin(e), start + 1) : start + 1
 }
 
 /** "08:00" or "08:00–09:00" (start only when no end time is set). */
@@ -159,10 +160,11 @@ function timeRange(ex: Exercise): string {
   return ex.endTime ? `${ex.time}–${ex.endTime}` : ex.time
 }
 
-/** "08:00" nebo „08:00–09:00“ pro konkrétní den (pokročilý rozvrh). */
+/** "08:00" nebo „08:00–09:00“ pro konkrétní den (pokročilý rozvrh: konec buňky, jinak globální endTime). */
 function timeRangeOn(ex: Exercise, date: string): string {
   const t = exTimeOn(ex, date)
-  return ex.endTime ? `${t}–${ex.endTime}` : t
+  const e = endOn(ex, date)
+  return e ? `${t}–${e}` : t
 }
 
 function gapLabel(mins: number): string {
@@ -625,14 +627,21 @@ function scheduleText(ex: Exercise): string {
   return t('everyNWeeksOff', { n: ex.every, o: ex.weekOffset ?? 1, list })
 }
 
+/** Popisek řádku cvičení; u pokročilého rozvrhu se globální čas neukazuje (časy jsou per-den). */
+function exerciseMeta(ex: Exercise): string {
+  // measuredUnit / onlyCheck už začínají vlastním oddělovačem „ · “
+  let meta = scheduleText(ex)
+  if (!(ex.weekTimes && Object.keys(ex.weekTimes).length)) meta += ' · ' + timeRange(ex)
+  meta += ex.unit ? t('measuredUnit', { u: ex.unit }) : t('onlyCheck')
+  return meta
+}
+
 function exerciseRow(ex: Exercise, archived: boolean): HTMLElement {
   return h('div', { class: `ex-item${archived ? ' ex-archived' : ''}` },
     h('span', { class: 'ex-dot', style: `background:${ex.color}` }),
     h('div', { class: 'grow' },
       h('div', { class: 'ex-name' }, ex.name),
-      h('div', { class: 'ex-meta' },
-        scheduleText(ex), ' · ', timeRange(ex),
-        ex.unit ? t('measuredUnit', { u: ex.unit }) : t('onlyCheck')),
+      h('div', { class: 'ex-meta' }, exerciseMeta(ex)),
     ),
     h('button', { class: 'btn small', onclick: () => openExerciseModal(ex) }, t('edit')),
     archived
@@ -758,6 +767,7 @@ function openExerciseModal(existing: Exercise | null): void {
     checked: !!(ex?.weekTimes && Object.keys(ex.weekTimes).length),
   })
   const advNow = h('div', { class: 'hint' }, '')
+  const advLegend = h('div', { class: 'hint', style: 'display:none;margin-top:8px' }, t('advCellHint'))
   const schedGrid = h('div', { class: 'sched-grid', style: 'display:none' })
   const advTools = h('div', { class: 'adv-tools' })
   const advWrap = h('div', { class: 'full adv-wrap' },
@@ -766,9 +776,11 @@ function openExerciseModal(existing: Exercise | null): void {
     advTools,
     advNow,
     schedGrid,
+    advLegend,
   )
-  /** cols[d][c] = čas buňky (den d, sloupec c) nebo '' = volno. */
+  /** cols[d][c] = začátek buňky (den d, sloupec c) nebo '' = volno; ends[d][c] = konec buňky nebo ''. */
   const cols: string[][] = []
+  const ends: string[][] = []
 
   function firstFilled(): string | null {
     for (let d = 0; d < 7; d++) {
@@ -790,7 +802,10 @@ function openExerciseModal(existing: Exercise | null): void {
   }
   function clearAll(): void {
     const n = everyVal()
-    for (let d = 0; d < 7; d++) if (cols[d]) for (let c = 1; c <= n; c++) cols[d][c] = ''
+    for (let d = 0; d < 7; d++) {
+      if (cols[d]) for (let c = 1; c <= n; c++) cols[d][c] = ''
+      if (ends[d]) for (let c = 1; c <= n; c++) ends[d][c] = ''
+    }
     renderGrid()
   }
   advTools.append(
@@ -808,6 +823,9 @@ function openExerciseModal(existing: Exercise | null): void {
       if (!cols[d]) cols[d] = []
       cols[d].length = n + 1
       for (let c = 1; c <= n; c++) if (cols[d][c] === undefined) cols[d][c] = ''
+      if (!ends[d]) ends[d] = []
+      ends[d].length = n + 1
+      for (let c = 1; c <= n; c++) if (ends[d][c] === undefined) ends[d][c] = ''
     }
     const wt = ex?.weekTimes
     if (wt) {
@@ -821,6 +839,18 @@ function openExerciseModal(existing: Exercise | null): void {
         }
       }
     }
+    const wet = ex?.weekEndTimes
+    if (wet) {
+      for (const [dd, by] of Object.entries(wet)) {
+        const d = Number(dd)
+        if (d < 0 || d > 6) continue
+        for (const [cc, v] of Object.entries(by)) {
+          const c = Number(cc)
+          if (c < 1 || c > n) continue
+          ends[d][c] = v === null ? '' : v
+        }
+      }
+    }
   }
   fillCols()
 
@@ -831,6 +861,7 @@ function openExerciseModal(existing: Exercise | null): void {
     const on = (advToggle as HTMLInputElement).checked && isWeekly
     ;(advWrap as HTMLElement).style.display = isWeekly ? '' : 'none'
     ;(schedGrid as HTMLElement).style.display = on ? '' : 'none'
+    ;(advLegend as HTMLElement).style.display = on ? '' : 'none'
     // Pokročilý rozvrh je absolutní – skryjeme staré ovladače, ať se nekříží.
     ;(weekdayField as HTMLElement).style.display = isWeekly && !on ? '' : 'none'
     ;(weekCycleField as HTMLElement).style.display = isWeekly && !on && n >= 2 ? '' : 'none'
@@ -840,7 +871,7 @@ function openExerciseModal(existing: Exercise | null): void {
     // Sloupec „1. týden“ = týden vytvoření cvičení (ukotvení), ne epochová fáze.
     const cur = weekColumn(store.today, n, ex?.weekAnchor ?? store.today)
     advNow.textContent = t('advWeekNow', { n: cur })
-    ;(schedGrid as HTMLElement).style.gridTemplateColumns = `auto repeat(${n}, minmax(88px, 1fr))`
+    ;(schedGrid as HTMLElement).style.gridTemplateColumns = `auto repeat(${n}, minmax(96px, 1fr))`
     schedGrid.innerHTML = ''
     schedGrid.append(h('div', { class: 'sched-head' }, ''))
     const wk = t('weekShort')
@@ -850,12 +881,21 @@ function openExerciseModal(existing: Exercise | null): void {
     weekdaysFull().forEach((wd, d) => {
       schedGrid.append(h('div', { class: 'sched-day' }, wd))
       for (let c = 1; c <= n; c++) {
-        schedGrid.append(h('input', {
-          type: 'time',
-          class: 'sched-cell' + (c === cur ? ' sched-now' : ''),
-          value: cols[d][c] ?? '',
-          oninput: (e: Event) => { cols[d][c] = (e.target as HTMLInputElement).value },
-        }))
+        // buňka = začátek (nahoře) + konec (dole, zvýrazněný okraj), obojí nepovinné
+        schedGrid.append(h('div', { class: 'sched-cell' + (c === cur ? ' sched-now' : '') },
+          h('input', {
+            type: 'time',
+            class: 'sched-s',
+            value: cols[d][c] ?? '',
+            oninput: (e: Event) => { cols[d][c] = (e.target as HTMLInputElement).value },
+          }),
+          h('input', {
+            type: 'time',
+            class: 'sched-e',
+            value: ends[d][c] ?? '',
+            oninput: (e: Event) => { ends[d][c] = (e.target as HTMLInputElement).value },
+          }),
+        ))
       }
     })
   }
@@ -941,22 +981,33 @@ function openExerciseModal(existing: Exercise | null): void {
       if (weekdays.length === 0) weekdays = [0]
     }
     const unitV = (unitIn as HTMLInputElement).value.trim()
-    // Pokročilý rozvrh: vyplněné buňky mřížky → weekTimes, jinak klasický rozvrh.
+    // Pokročilý rozvrh: vyplněné buňky mřížky → weekTimes (+ weekEndTimes = konce buňek),
+    // jinak klasický rozvrh.
     let weekTimes: Exercise['weekTimes']
     let weekAnchor: Exercise['weekAnchor']
+    let weekEndTimes: Exercise['weekEndTimes']
     if (kind === 'weekly' && (advToggle as HTMLInputElement).checked) {
       const wt: NonNullable<Exercise['weekTimes']> = {}
+      const wet: NonNullable<Exercise['weekEndTimes']> = {}
       for (let d = 0; d < 7; d++) {
         const cells: Record<string, string | null> = {}
+        const endsCells: Record<string, string | null> = {}
         for (let c = 1; c <= every; c++) {
           const v = (cols[d]?.[c] ?? '').trim()
-          if (v) cells[String(c)] = v
+          if (v) {
+            cells[String(c)] = v
+            // konec má smysl jen u buňky, která se skutečně trénuje
+            const e = (ends[d]?.[c] ?? '').trim()
+            if (e) endsCells[String(c)] = e
+          }
         }
         if (Object.keys(cells).length) wt[String(d)] = cells
+        if (Object.keys(endsCells).length) wet[String(d)] = endsCells
       }
       if (Object.keys(wt).length) {
         weekTimes = wt
         weekAnchor = ex?.weekAnchor ?? store.today
+        if (Object.keys(wet).length) weekEndTimes = wet
       }
     }
     const payload = {
@@ -971,6 +1022,7 @@ function openExerciseModal(existing: Exercise | null): void {
       endTime: (endIn as HTMLInputElement).value || null,
       unit: unitV ? unitV : null,
       weekTimes,
+      weekEndTimes,
       weekAnchor,
     }
     void (ex ? store.updateExercise(ex.id, payload) : store.addExercise(payload)).then(closeModal)

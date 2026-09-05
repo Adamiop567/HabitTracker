@@ -24,6 +24,10 @@ export interface Exercise {
    *  Přítomnost = absolutní výběr: políčko s časem znamená trénink, chybějící = volno.
    *  Nepřítomno = klasický rozvrh (weekdays + time). */
   weekTimes?: Record<string, Record<string, string | null>>
+  /** Pokročilý rozvrh – konec na buňku: stejná struktura jako weekTimes (den → týden → "HH:MM").
+   *  Buňka bez vlastního konce použije globální `endTime`; chybí-li i ten, trénink konce nemá.
+   *  Nepřítomno = žádné per-buňkové konce. */
+  weekEndTimes?: Record<string, Record<string, string | null>>
   /** Ukotvení sloupce „1. týden“ pokročilého rozvrhu na týden obsahující toto datum
    *  (obvykle týden vytvoření cvičení). Chybí → epochová fáze cyklu. */
   weekAnchor?: string | null

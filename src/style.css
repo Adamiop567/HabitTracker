@@ -485,6 +485,9 @@ tr.day-row:hover { background: var(--row-hover); }
 .sched-grid { display: grid; gap: 4px; align-items: center; margin-top: 10px; overflow-x: auto; padding-bottom: 4px; }
 .sched-head { font-size: 0.75rem; opacity: 0.6; text-align: center; white-space: nowrap; }
 .sched-day { font-size: 0.85rem; white-space: nowrap; }
-.sched-cell { min-width: 0; width: 100%; padding: 5px 6px; }
-.sched-now { outline: 1px solid var(--accent); border-radius: 4px; }
+/* buňka = začátek + konec (dva časové vstupy pod sebou) */
+.sched-cell { min-width: 0; display: flex; flex-direction: column; gap: 3px; padding: 3px; border-radius: 8px; }
+.sched-cell input[type='time'] { width: 100%; min-width: 0; padding: 4px 5px; }
+.sched-cell .sched-e { border-left: 3px solid var(--accent); }
+.sched-now { outline: 1px solid var(--accent); }
 .adv-tools { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }

@@ -107,8 +107,10 @@ function normalize(raw: { exercises?: unknown[]; logs?: unknown[]; groups?: unkn
       time: typeof r.time === 'string' && /^\d{2}:\d{2}$/.test(r.time) ? r.time : '08:00',
       endTime:
         typeof r.endTime === 'string' && /^\d{2}:\d{2}$/.test(r.endTime) ? r.endTime : null,
-      // v6: pokročilý rozvrh (den → týden cyklu → čas). Předává se beze změny, jen se očistí.
+      // v6: pokročilý rozvrh (den → týden cyklu → čas) + volitelné konce na buňku.
+      // Předávají se beze změny, jen se očistí.
       weekTimes: normWeekTimes(r.weekTimes),
+      weekEndTimes: normWeekTimes(r.weekEndTimes),
       weekAnchor:
         typeof r.weekAnchor === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(r.weekAnchor) ? r.weekAnchor.slice(0, 10) : null,
       unit: typeof r.unit === 'string' && r.unit.trim() ? r.unit : null,

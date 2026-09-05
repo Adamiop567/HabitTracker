@@ -65,7 +65,9 @@ interface ScheduleLike {
   weekday?: number
   anchor?: string | null
   time?: string
+  endTime?: string | null
   weekTimes?: Record<string, Record<string, string | null>>
+  weekEndTimes?: Record<string, Record<string, string | null>>
   weekAnchor?: string | null
 }
 
@@ -117,6 +119,24 @@ export function timeOn(s: ScheduleLike, date: string): string | null {
     if (cell !== undefined) return cell // null = tento den ve tomto týdnu volno
   }
   return s.time ?? null
+}
+
+/** Efektivní plánovaný konec cvičení pro daný den.
+ *  U pokročilého rozvrhu: vlastní konec buňky (weekEndTimes) má přednost,
+ *  jinak globální `endTime`; neexistuje-li žádný, vrací null (trénink bez konce). */
+export function endOn(s: ScheduleLike, date: string): string | null {
+  if (s.kind === 'weekly') {
+    const wt = s.weekTimes
+    if (wt && Object.keys(wt).length) {
+      const w = isoWeekday(date) - 1
+      const ends = s.weekEndTimes
+      if (ends && Object.keys(ends).length) {
+        const cell = ends[String(w)]?.[String(weekColumn(date, s.every, s.weekAnchor))]
+        if (cell !== undefined) return cell // explicitní konec (nebo null) pro tento den/týden
+      }
+    }
+  }
+  return s.endTime ?? null
 }
 
 /** "Po", "Mon", "Mo", … – short weekday of the given date. */
