@@ -689,6 +689,11 @@ function openExerciseModal(existing: Exercise | null): void {
   const everyNum = h('input', { type: 'number', min: '1', max: '365', value: String(ex?.every ?? 1), oninput: () => updateWeekCycle() })
   const timeIn = h('input', { type: 'time', value: ex?.time ?? '08:00' })
   const endIn = h('input', { type: 'time', value: ex?.endTime ?? '' })
+  const timeField = h('div', {}, h('label', {}, t('timeLabel')), timeIn)
+  const endField = h('div', {},
+    h('label', {}, t('endTimeLabel')), endIn,
+    h('div', { class: 'hint' }, t('endTimeHint')),
+  )
   const unitIn = h('input', { type: 'text', value: ex?.unit ?? '', placeholder: 'km, min, opakování…', maxlength: '12' })
 
   /* ---- color picker ---- */
@@ -903,12 +908,6 @@ function openExerciseModal(existing: Exercise | null): void {
   updateKind()
   updateWeekCycle()
   renderGrid()
-
-  const timeField = h('div', {}, h('label', {}, t('timeLabel')), timeIn)
-  const endField = h('div', {},
-    h('label', {}, t('endTimeLabel')), endIn,
-    h('div', { class: 'hint' }, t('endTimeHint')),
-  )
 
   const body = [
     h('div', { class: 'form-grid' },
