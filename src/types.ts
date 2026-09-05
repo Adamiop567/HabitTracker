@@ -24,6 +24,9 @@ export interface Exercise {
    *  Přítomnost = absolutní výběr: políčko s časem znamená trénink, chybějící = volno.
    *  Nepřítomno = klasický rozvrh (weekdays + time). */
   weekTimes?: Record<string, Record<string, string | null>>
+  /** Ukotvení sloupce „1. týden“ pokročilého rozvrhu na týden obsahující toto datum
+   *  (obvykle týden vytvoření cvičení). Chybí → epochová fáze cyklu. */
+  weekAnchor?: string | null
   /** unit for measured value, e.g. "km", "min". null => checkbox-only exercise */
   unit: string | null
   archived: boolean

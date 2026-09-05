@@ -487,3 +487,4 @@ tr.day-row:hover { background: var(--row-hover); }
 .sched-day { font-size: 0.85rem; white-space: nowrap; }
 .sched-cell { min-width: 0; width: 100%; padding: 5px 6px; }
 .sched-now { outline: 1px solid var(--accent); border-radius: 4px; }
+.adv-tools { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }

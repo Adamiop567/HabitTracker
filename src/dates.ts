@@ -66,6 +66,7 @@ interface ScheduleLike {
   anchor?: string | null
   time?: string
   weekTimes?: Record<string, Record<string, string | null>>
+  weekAnchor?: string | null
 }
 
 /** Whether an occurrence of a schedule exists on the given date.
@@ -86,12 +87,23 @@ export function occursOn(s: ScheduleLike, date: string): boolean {
   const w = isoWeekday(date) - 1
   const wt = s.weekTimes
   if (wt && Object.keys(wt).length) {
-    const cell = wt[String(w)]?.[String(weekOffsetFor(date, s.every))]
+    const cell = wt[String(w)]?.[String(weekColumn(date, s.every, s.weekAnchor))]
     return cell !== undefined && cell !== null
   }
   if (!weekdays.includes(w)) return false
   const offset = s.weekOffset ?? 1
   return weekOffsetFor(date, s.every) === offset
+}
+
+/** Číslo sloupce (1..n) pokročilého rozvrhu pro dané datum.
+ *  S ukotvením (weekAnchor) je 1. týden = týden ukotvení (obvykle vytvoření cvičení);
+ *  bez ukotvení se použije epochová fáze cyklu (zpětná kompatibilita). */
+export function weekColumn(date: string, n: number, anchor?: string | null): number {
+  if (anchor && /^\d{4}-\d{2}-\d{2}$/.test(anchor)) {
+    const diff = weekIndexOf(date) - weekIndexOf(anchor)
+    return ((diff % n) + n) % n + 1
+  }
+  return weekOffsetFor(date, n)
 }
 
 /** Efektivní plánovaný čas cvičení pro daný den (respektuje pokročilý rozvrh).
@@ -101,7 +113,7 @@ export function timeOn(s: ScheduleLike, date: string): string | null {
   const w = isoWeekday(date) - 1
   const wt = s.weekTimes
   if (wt && Object.keys(wt).length) {
-    const cell = wt[String(w)]?.[String(weekOffsetFor(date, s.every))]
+    const cell = wt[String(w)]?.[String(weekColumn(date, s.every, s.weekAnchor))]
     if (cell !== undefined) return cell // null = tento den ve tomto týdnu volno
   }
   return s.time ?? null

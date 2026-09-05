@@ -5,7 +5,7 @@ import {
   dayStats, exerciseHistory, logFor, manualLogsForDay, planForDay,
   volumeByWeek, weekLabel, weekTotals, activeExercises, type DayStats,
 } from './aggregate'
-import { addDays, formatDay, humanDate, mondayOf, timeOn, weekdayFull, weekOffsetFor } from './dates'
+import { addDays, formatDay, humanDate, mondayOf, timeOn, weekColumn, weekdayFull, weekOffsetFor } from './dates'
 import { LANGS, LANG_LABELS, getLang, setLang, t, weekdaysFull, weekdaysShort } from './i18n'
 import { apiAdminDeleteUser, apiAdminUserData, apiAdminUsers, getSession, type AdminUserInfo } from './api'
 import { downloadJson, FILE_NAME, parseJsonFile } from './storage'
@@ -754,14 +754,44 @@ function openExerciseModal(existing: Exercise | null): void {
   })
   const advNow = h('div', { class: 'hint' }, '')
   const schedGrid = h('div', { class: 'sched-grid', style: 'display:none' })
+  const advTools = h('div', { class: 'adv-tools' })
   const advWrap = h('div', { class: 'full adv-wrap' },
     h('label', { class: 'adv-label' }, advToggle, ' ', t('advLabel')),
     h('div', { class: 'hint' }, t('advHint')),
+    advTools,
     advNow,
     schedGrid,
   )
   /** cols[d][c] = čas buňky (den d, sloupec c) nebo '' = volno. */
   const cols: string[][] = []
+
+  function firstFilled(): string | null {
+    for (let d = 0; d < 7; d++) {
+      for (const c of Object.keys(cols[d] ?? {})) {
+        const v = cols[d][Number(c)]
+        if (v) return v
+      }
+    }
+    return null
+  }
+  function fillAll(): void {
+    const t0 = firstFilled() ?? ((timeIn as HTMLInputElement).value || '08:00')
+    const n = everyVal()
+    for (let d = 0; d < 7; d++) {
+      if (!cols[d]) cols[d] = []
+      for (let c = 1; c <= n; c++) cols[d][c] = t0
+    }
+    renderGrid()
+  }
+  function clearAll(): void {
+    const n = everyVal()
+    for (let d = 0; d < 7; d++) if (cols[d]) for (let c = 1; c <= n; c++) cols[d][c] = ''
+    renderGrid()
+  }
+  advTools.append(
+    h('button', { type: 'button', class: 'btn small', onclick: fillAll }, t('advFillAll')),
+    h('button', { type: 'button', class: 'btn small ghost', onclick: clearAll }, t('advClearAll')),
+  )
 
   function everyVal(): number {
     return Math.min(365, Math.max(1, Math.floor(Number((everyNum as HTMLInputElement).value) || 1)))
@@ -791,13 +821,19 @@ function openExerciseModal(existing: Exercise | null): void {
 
   function renderGrid(): void {
     const kind = (kindSel as HTMLSelectElement).value
-    const on = (advToggle as HTMLInputElement).checked && kind === 'weekly'
-    ;(advWrap as HTMLElement).style.display = kind === 'weekly' ? '' : 'none'
-    ;(schedGrid as HTMLElement).style.display = on ? '' : 'none'
-    if (!on) return
+    const isWeekly = kind === 'weekly'
     const n = everyVal()
+    const on = (advToggle as HTMLInputElement).checked && isWeekly
+    ;(advWrap as HTMLElement).style.display = isWeekly ? '' : 'none'
+    ;(schedGrid as HTMLElement).style.display = on ? '' : 'none'
+    // Pokročilý rozvrh je absolutní – skryjeme staré ovladače, ať se nekříží.
+    ;(weekdayField as HTMLElement).style.display = isWeekly && !on ? '' : 'none'
+    ;(weekCycleField as HTMLElement).style.display = isWeekly && !on && n >= 2 ? '' : 'none'
+    ;(timeField as HTMLElement).style.display = on ? 'none' : ''
+    if (!on) return
     fillCols()
-    const cur = weekOffsetFor(store.today, n)
+    // Sloupec „1. týden“ = týden vytvoření cvičení (ukotvení), ne epochová fáze.
+    const cur = weekColumn(store.today, n, ex?.weekAnchor ?? store.today)
     advNow.textContent = t('advWeekNow', { n: cur })
     ;(schedGrid as HTMLElement).style.gridTemplateColumns = `auto repeat(${n}, minmax(88px, 1fr))`
     schedGrid.innerHTML = ''
@@ -868,6 +904,12 @@ function openExerciseModal(existing: Exercise | null): void {
   updateWeekCycle()
   renderGrid()
 
+  const timeField = h('div', {}, h('label', {}, t('timeLabel')), timeIn)
+  const endField = h('div', {},
+    h('label', {}, t('endTimeLabel')), endIn,
+    h('div', { class: 'hint' }, t('endTimeHint')),
+  )
+
   const body = [
     h('div', { class: 'form-grid' },
       h('div', { class: 'full' }, h('label', {}, t('nameLabel')), name),
@@ -880,11 +922,8 @@ function openExerciseModal(existing: Exercise | null): void {
       weekdayField,
       weekCycleField,
       advWrap,
-      h('div', {}, h('label', {}, t('timeLabel')), timeIn),
-      h('div', {},
-        h('label', {}, t('endTimeLabel')), endIn,
-        h('div', { class: 'hint' }, t('endTimeHint')),
-      ),
+      timeField,
+      endField,
       h('div', { class: 'full' },
         h('label', {}, t('unitLabel')), unitIn,
         h('div', { class: 'hint' }, t('unitHint')),
@@ -905,6 +944,7 @@ function openExerciseModal(existing: Exercise | null): void {
     const unitV = (unitIn as HTMLInputElement).value.trim()
     // Pokročilý rozvrh: vyplněné buňky mřížky → weekTimes, jinak klasický rozvrh.
     let weekTimes: Exercise['weekTimes']
+    let weekAnchor: Exercise['weekAnchor']
     if (kind === 'weekly' && (advToggle as HTMLInputElement).checked) {
       const wt: NonNullable<Exercise['weekTimes']> = {}
       for (let d = 0; d < 7; d++) {
@@ -915,7 +955,10 @@ function openExerciseModal(existing: Exercise | null): void {
         }
         if (Object.keys(cells).length) wt[String(d)] = cells
       }
-      if (Object.keys(wt).length) weekTimes = wt
+      if (Object.keys(wt).length) {
+        weekTimes = wt
+        weekAnchor = ex?.weekAnchor ?? store.today
+      }
     }
     const payload = {
       name: nameV,
@@ -929,6 +972,7 @@ function openExerciseModal(existing: Exercise | null): void {
       endTime: (endIn as HTMLInputElement).value || null,
       unit: unitV ? unitV : null,
       weekTimes,
+      weekAnchor,
     }
     void (ex ? store.updateExercise(ex.id, payload) : store.addExercise(payload)).then(closeModal)
   }
